@@ -57,94 +57,20 @@ void smtpCallback(SMTP_Status status);
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
 WiFiMulti multi;
 #endif
-String data;
 
-int index1;
-int index2;
-int index3;
-String temp;
-String tds;
-String ec;
-String ph;
 
-void setup()
-{
+volatile int index1;
+volatile int index2;
+volatile int index3;
+String data; 
+String temp; 
+String tds; 
+String ec; 
+String ph; 
 
-  Serial.begin(9600);
-  Serial2.begin(9600, SERIAL_8N1, 16, 17);
 
-#if defined(ARDUINO_ARCH_SAMD)
-  while (!Serial)
-    ;
-#endif
 
-  Serial.println();
-
-#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
-  multi.addAP(WIFI_SSID, WIFI_PASSWORD);
-  multi.run();
-#else
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-#endif
-
-  Serial.print("Connecting to Wi-Fi");
-
-#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
-  unsigned long ms = millis();
-#endif
-
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(300);
-#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
-    if (millis() - ms > 10000)
-      break;
-#endif
-  }
-  Serial.println();
-  Serial.print("Connected with IP: ");
-  Serial.println(WiFi.localIP());
-  Serial.println();
-
-  /*  Set the network reconnection option */
-  MailClient.networkReconnect(true);
-
-  // The WiFi credentials are required for Pico W
-  // due to it does not have reconnect feature.
-#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
-  MailClient.clearAP();
-  MailClient.addAP(WIFI_SSID, WIFI_PASSWORD);
-#endif
-}
-
-void loop()
-{
-
-  if (Serial2.available())
-  {
-    String data = Serial2.readStringUntil('\n');
-    Serial.println("Received: " + data);
-    // Split by commas
-    int index1 = data.indexOf(',');
-    int index2 = data.indexOf(',', index1 + 1);
-    int index3 = data.indexOf(',', index2 + 1);
-
-    temp = data.substring(0, index1);
-    tds = data.substring(index1 + 1, index2);
-    ec = data.substring(index2 + 1, index3);
-    ph = data.substring(index3 + 1);
-
-    Serial.println("Temp: " + temp);
-    Serial.println("TDS: " + tds);
-    Serial.println("EC: " + ec);
-    Serial.println("pH: " + ph);
-  }
-
-  smtpTicker.attach(1800, smtpProcess);
-}
-
-void smtpProcess(String inString)
+void smtpProcess()
 {
   smtp.debug(1);
 
@@ -295,4 +221,85 @@ void smtpCallback(SMTP_Status status)
     // You need to clear sending result as the memory usage will grow up.
     smtp.sendingResult.clear();
   }
+}
+
+void setup()
+{
+  data.reserve(50);
+  temp.reserve(50);
+  tds.reserve(50);
+  ec.reserve(50);
+  ph.reserve(50);
+  Serial.begin(9600);
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);
+
+#if defined(ARDUINO_ARCH_SAMD)
+  while (!Serial)
+    ;
+#endif
+
+  Serial.println();
+
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  multi.addAP(WIFI_SSID, WIFI_PASSWORD);
+  multi.run();
+#else
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
+  Serial.print("Connecting to Wi-Fi");
+
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  unsigned long ms = millis();
+#endif
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(300);
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    if (millis() - ms > 10000)
+      break;
+#endif
+  }
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  /*  Set the network reconnection option */
+  MailClient.networkReconnect(true);
+
+  // The WiFi credentials are required for Pico W
+  // due to it does not have reconnect feature.
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+  MailClient.clearAP();
+  MailClient.addAP(WIFI_SSID, WIFI_PASSWORD);
+#endif
+}
+
+void loop()
+{
+
+  if (Serial2.available())
+  {
+    String data = Serial2.readStringUntil('\n');
+    Serial.println("Received: " + data);
+    // Split by commas
+    int index1 = data.indexOf(',');
+    int index2 = data.indexOf(',', index1 + 1);
+    int index3 = data.indexOf(',', index2 + 1);
+
+    String temp = data.substring(0, index1);
+    String tds = data.substring(index1 + 1, index2);
+    String ec = data.substring(index2 + 1, index3);
+    String ph = data.substring(index3 + 1);
+
+    Serial.println("Temp: " + temp);
+    Serial.println("TDS: " + tds);
+    Serial.println("EC: " + ec);
+    Serial.println("pH: " + ph);
+  }
+
+  smtpTicker.attach_ms(1800000, smtpProcess);
 }
