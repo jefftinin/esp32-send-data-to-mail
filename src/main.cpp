@@ -4,7 +4,8 @@
 #include <WiFi.h>
 #include <Ticker.h>
 
-Ticker smtpTicker;
+//Ticker smtpTicker;
+Ticker serialTicker;
 
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -67,11 +68,42 @@ String temp;
 String tds; 
 String ec; 
 String ph; 
+String htmlMsg;
 
+/* Declare the message class */
+SMTP_Message message;
 
+volatile bool busy = false;
+
+void serialProcess() {
+  if (Serial2.available() && !busy)
+  {
+    String data = Serial2.readStringUntil('\n');
+    Serial.println("Received: " + data);
+    // Split by commas
+    index1 = data.indexOf(',');
+    index2 = data.indexOf(',', index1 + 1);
+    index3 = data.indexOf(',', index2 + 1);
+
+    temp = data.substring(0, index1);
+    tds = data.substring(index1 + 1, index2);
+    ec = data.substring(index2 + 1, index3);
+    ph = data.substring(index3 + 1);
+
+    Serial.println("Temp: " + temp);
+    Serial.println("TDS: " + tds);
+    Serial.println("EC: " + ec);
+    Serial.println("pH: " + ph);
+  }
+}
 
 void smtpProcess()
 {
+  if (!busy) {
+    busy = 1;
+  } else {
+    return;
+  }
   smtp.debug(1);
 
   smtp.callback(smtpCallback);
@@ -101,8 +133,7 @@ void smtpProcess()
   // config.sentLogs.filename = "/path/to/log/file";
   // config.sentLogs.storage_type = esp_mail_file_storage_type_flash;
 
-  /* Declare the message class */
-  SMTP_Message message;
+  
 
   /* Set the message headers */
   message.sender.name = F("ESP32");
@@ -110,7 +141,9 @@ void smtpProcess()
   message.subject = F("Unit Message");
   message.addRecipient(F("Admin"), RECIPIENT_EMAIL);
 
-  String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
+  //String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
+  htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
+
   message.html.content = htmlMsg;
 
   /** The html text message character set e.g.
@@ -181,57 +214,21 @@ void smtpProcess()
   // smtp.sendingResult.clear();
 
   MailClient.printf("Free Heap: %d\n", MailClient.getFreeHeap());
-}
-/* Callback function to get the Email sending status */
-void smtpCallback(SMTP_Status status)
-{
-  /* Print the current status */
-  Serial.println(status.info());
-
-  /* Print the sending result */
-  if (status.success())
-  {
-    // MailClient.printf used in the examples is for format printing via debug Serial port
-    // that works for all supported Arduino platform SDKs e.g. SAMD, ESP32 and ESP8266.
-    // In ESP8266 and ESP32, you can use Serial.printf directly.
-
-    Serial.println("----------------");
-    MailClient.printf("Message sent success: %d\n", status.completedCount());
-    MailClient.printf("Message sent failed: %d\n", status.failedCount());
-    Serial.println("----------------\n");
-
-    for (size_t i = 0; i < smtp.sendingResult.size(); i++)
-    {
-      /* Get the result item */
-      SMTP_Result result = smtp.sendingResult.getItem(i);
-
-      // In case, ESP32, ESP8266 and SAMD device, the timestamp get from result.timestamp should be valid if
-      // your device time was synched with NTP server.
-      // Other devices may show invalid timestamp as the device time was not set i.e. it will show Jan 1, 1970.
-      // You can call smtp.setSystemTime(xxx) to set device time manually. Where xxx is timestamp (seconds since Jan 1, 1970)
-
-      MailClient.printf("Message No: %d\n", i + 1);
-      MailClient.printf("Status: %s\n", result.completed ? "success" : "failed");
-      MailClient.printf("Date/Time: %s\n", MailClient.Time.getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S").c_str());
-      MailClient.printf("Recipient: %s\n", result.recipients.c_str());
-      MailClient.printf("Subject: %s\n", result.subject.c_str());
-    }
-    Serial.println("----------------\n");
-
-    // You need to clear sending result as the memory usage will grow up.
-    smtp.sendingResult.clear();
-  }
+  busy = false;
 }
 
 void setup()
 {
-  data.reserve(50);
-  temp.reserve(50);
-  tds.reserve(50);
-  ec.reserve(50);
-  ph.reserve(50);
+  data.reserve(200);
+  temp.reserve(200);
+  tds.reserve(200);
+  ec.reserve(200);
+  ph.reserve(200);
+  htmlMsg.reserve(200);
   Serial.begin(9600);
-  Serial2.begin(9600, SERIAL_8N1, 16, 17);
+  Serial2.begin(19200, SERIAL_8N1, 16, 17);
+  //smtpTicker.attach_ms(5000, smtpProcess);
+  serialTicker.attach_ms(1000, serialProcess);
 
 #if defined(ARDUINO_ARCH_SAMD)
   while (!Serial)
@@ -280,26 +277,48 @@ void setup()
 
 void loop()
 {
+  smtpProcess();
+  delay(300000);
+}
 
-  if (Serial2.available())
+
+/* Callback function to get the Email sending status */
+void smtpCallback(SMTP_Status status)
+{
+  /* Print the current status */
+  Serial.println(status.info());
+
+  /* Print the sending result */
+  if (status.success())
   {
-    String data = Serial2.readStringUntil('\n');
-    Serial.println("Received: " + data);
-    // Split by commas
-    int index1 = data.indexOf(',');
-    int index2 = data.indexOf(',', index1 + 1);
-    int index3 = data.indexOf(',', index2 + 1);
+    // MailClient.printf used in the examples is for format printing via debug Serial port
+    // that works for all supported Arduino platform SDKs e.g. SAMD, ESP32 and ESP8266.
+    // In ESP8266 and ESP32, you can use Serial.printf directly.
 
-    String temp = data.substring(0, index1);
-    String tds = data.substring(index1 + 1, index2);
-    String ec = data.substring(index2 + 1, index3);
-    String ph = data.substring(index3 + 1);
+    Serial.println("----------------");
+    MailClient.printf("Message sent success: %d\n", status.completedCount());
+    MailClient.printf("Message sent failed: %d\n", status.failedCount());
+    Serial.println("----------------\n");
 
-    Serial.println("Temp: " + temp);
-    Serial.println("TDS: " + tds);
-    Serial.println("EC: " + ec);
-    Serial.println("pH: " + ph);
+    for (size_t i = 0; i < smtp.sendingResult.size(); i++)
+    {
+      /* Get the result item */
+      SMTP_Result result = smtp.sendingResult.getItem(i);
+
+      // In case, ESP32, ESP8266 and SAMD device, the timestamp get from result.timestamp should be valid if
+      // your device time was synched with NTP server.
+      // Other devices may show invalid timestamp as the device time was not set i.e. it will show Jan 1, 1970.
+      // You can call smtp.setSystemTime(xxx) to set device time manually. Where xxx is timestamp (seconds since Jan 1, 1970)
+
+      MailClient.printf("Message No: %d\n", i + 1);
+      MailClient.printf("Status: %s\n", result.completed ? "success" : "failed");
+      MailClient.printf("Date/Time: %s\n", MailClient.Time.getDateTimeString(result.timestamp, "%B %d, %Y %H:%M:%S").c_str());
+      MailClient.printf("Recipient: %s\n", result.recipients.c_str());
+      MailClient.printf("Subject: %s\n", result.subject.c_str());
+    }
+    Serial.println("----------------\n");
+
+    // You need to clear sending result as the memory usage will grow up.
+    smtp.sendingResult.clear();
   }
-
-  smtpTicker.attach_ms(1800000, smtpProcess);
 }
