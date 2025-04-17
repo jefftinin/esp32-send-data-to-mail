@@ -2,6 +2,10 @@
 #include <Arduino.h>
 #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
+#include <Ticker.h>
+
+Ticker smtpTicker;
+
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #elif __has_include(<WiFiNINA.h>)
@@ -53,11 +57,21 @@ void smtpCallback(SMTP_Status status);
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
 WiFiMulti multi;
 #endif
+String data;
+
+int index1;
+int index2;
+int index3;
+String temp;
+String tds;
+String ec;
+String ph;
 
 void setup()
 {
 
   Serial.begin(9600);
+  Serial2.begin(9600, SERIAL_8N1, 16, 17);
 
 #if defined(ARDUINO_ARCH_SAMD)
   while (!Serial)
@@ -105,6 +119,32 @@ void setup()
 }
 
 void loop()
+{
+
+  if (Serial2.available())
+  {
+    String data = Serial2.readStringUntil('\n');
+    Serial.println("Received: " + data);
+    // Split by commas
+    int index1 = data.indexOf(',');
+    int index2 = data.indexOf(',', index1 + 1);
+    int index3 = data.indexOf(',', index2 + 1);
+
+    temp = data.substring(0, index1);
+    tds = data.substring(index1 + 1, index2);
+    ec = data.substring(index2 + 1, index3);
+    ph = data.substring(index3 + 1);
+
+    Serial.println("Temp: " + temp);
+    Serial.println("TDS: " + tds);
+    Serial.println("EC: " + ec);
+    Serial.println("pH: " + ph);
+  }
+
+  smtpTicker.attach(1800, smtpProcess);
+}
+
+void smtpProcess(String inString)
 {
   smtp.debug(1);
 
@@ -215,10 +255,7 @@ void loop()
   // smtp.sendingResult.clear();
 
   MailClient.printf("Free Heap: %d\n", MailClient.getFreeHeap());
-
-  delay(300000);
 }
-
 /* Callback function to get the Email sending status */
 void smtpCallback(SMTP_Status status)
 {
