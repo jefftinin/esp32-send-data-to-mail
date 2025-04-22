@@ -3,8 +3,9 @@
 #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
 #include <Ticker.h>
+#include <string.h>
 
-//Ticker smtpTicker;
+// Ticker smtpTicker;
 Ticker serialTicker;
 
 #elif defined(ESP8266)
@@ -59,23 +60,29 @@ void smtpCallback(SMTP_Status status);
 WiFiMulti multi;
 #endif
 
-
 volatile int index1;
 volatile int index2;
 volatile int index3;
-String data; 
-String temp; 
-String tds; 
-String ec; 
-String ph; 
+String data;
+String temp;
+String tds;
+String ec;
+String ph;
 String htmlMsg;
+unsigned long lastExecTime = 0;
+const unsigned long interval = 300000;
+
+float tempThreshold = 35;
+float ecThreshold = 2.0;
+float phThreshold = 6.0;
 
 /* Declare the message class */
 SMTP_Message message;
 
 volatile bool busy = false;
 
-void serialProcess() {
+void serialProcess()
+{
   if (Serial2.available() && !busy)
   {
     String data = Serial2.readStringUntil('\n');
@@ -99,9 +106,12 @@ void serialProcess() {
 
 void smtpProcess()
 {
-  if (!busy) {
+  if (!busy)
+  {
     busy = 1;
-  } else {
+  }
+  else
+  {
     return;
   }
   smtp.debug(1);
@@ -133,16 +143,34 @@ void smtpProcess()
   // config.sentLogs.filename = "/path/to/log/file";
   // config.sentLogs.storage_type = esp_mail_file_storage_type_flash;
 
-  
-
   /* Set the message headers */
   message.sender.name = F("ESP32");
   message.sender.email = AUTHOR_EMAIL;
   message.subject = F("Unit Message");
   message.addRecipient(F("Admin"), RECIPIENT_EMAIL);
 
-  //String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
+  if ((ph.toFloat() < phThreshold))
+  {
+    message.subject = F("Soil pH too low!");
+  }
+  else if (ec.toFloat() > ecThreshold)
+  {
+    message.subject = F("Soil Electroconductivity too High!");
+  }
+  else if (temp.toFloat() > tempThreshold)
+  {
+    message.subject = F("Temperature too high!");
+  }
+  else
+  {
+    message.subject = F("Normal Reading");
+  }
+
+  // String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
+
   htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
+
+  // htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
 
   message.html.content = htmlMsg;
 
@@ -227,7 +255,7 @@ void setup()
   htmlMsg.reserve(200);
   Serial.begin(9600);
   Serial2.begin(19200, SERIAL_8N1, 16, 17);
-  //smtpTicker.attach_ms(5000, smtpProcess);
+  // smtpTicker.attach_ms(5000, smtpProcess);
   serialTicker.attach_ms(1000, serialProcess);
 
 #if defined(ARDUINO_ARCH_SAMD)
@@ -277,10 +305,21 @@ void setup()
 
 void loop()
 {
-  smtpProcess();
-  delay(300000);
-}
+  unsigned long currentTime = millis();
 
+  if ((ph.toFloat() < phThreshold || ec.toFloat() > ecThreshold || temp.toFloat() > tempThreshold))
+  {
+    smtpProcess();
+  }
+  else
+  {
+    if (currentTime - lastExecTime >= interval)
+    {
+      smtpProcess();
+      lastExecTime = currentTime;
+    }
+  }
+}
 
 /* Callback function to get the Email sending status */
 void smtpCallback(SMTP_Status status)
