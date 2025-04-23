@@ -20,8 +20,8 @@ Ticker serialTicker;
 
 #include <ESP_Mail_Client.h>
 
-#define WIFI_SSID "OnlyF1"
-#define WIFI_PASSWORD "\"PZ9T]H*1&x&o)jR#0L,"
+#define WIFI_SSID "esp32-thesis"
+#define WIFI_PASSWORD "thesis123456"
 
 /** For Gmail, the app password will be used for log in
  *  Check out https://github.com/mobizt/ESP-Mail-Client#gmail-smtp-and-imap-required-app-passwords-to-sign-in
