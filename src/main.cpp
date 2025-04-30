@@ -2,11 +2,42 @@
 #include <Arduino.h>
 #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
-#include <Ticker.h>
+//#include <Ticker.h>
 #include <string.h>
+#include <Wire.h>
+#include <DFRobot_SHT20.h>
+#include "GravityTDS.h"
+
+DFRobot_SHT20 sht20(&Wire);
+
+#define TdsSensorPin 35
+#define MotorPin 26
+#define phPin 34
+#define SHT_SDA 33
+#define SHT_SCL 32
+GravityTDS gravityTds;
 
 // Ticker smtpTicker;
-Ticker serialTicker;
+// Ticker serialTicker;
+// Ticker phTicker;
+
+// Sensor variables
+float temperature = 25;
+float tdsValue = 0;
+float ecValue = 0;
+float ec25Value = 0;
+
+// pH sensor variables
+float calibration_value = 26.34 - 0.5;
+int buffer_arr[10], temp;
+unsigned long int avgval;
+float ph_act;
+
+// User adjustable
+float phThreshold = 6.0;
+float ecThreshold = 2.0;
+float tempThreshold = 35;
+bool testmode = true;
 
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -22,38 +53,14 @@ Ticker serialTicker;
 
 #define WIFI_SSID "esp32-thesis"
 #define WIFI_PASSWORD "thesis123456"
-
-/** For Gmail, the app password will be used for log in
- *  Check out https://github.com/mobizt/ESP-Mail-Client#gmail-smtp-and-imap-required-app-passwords-to-sign-in
- *
- * For Yahoo mail, log in to your yahoo mail in web browser and generate app password by go to
- * https://login.yahoo.com/account/security/app-passwords/add/confirm?src=noSrc
- *
- * To use Gmai and Yahoo's App Password to sign in, define the AUTHOR_PASSWORD with your App Password
- * and AUTHOR_EMAIL with your account email.
- */
-
-/** The smtp host name e.g. smtp.gmail.com for GMail or smtp.office365.com for Outlook or smtp.mail.yahoo.com */
-#define SMTP_HOST "disroot.org"
-
-/** The smtp port e.g.
- * 25  or esp_mail_smtp_port_25
- * 465 or esp_mail_smtp_port_465
- * 587 or esp_mail_smtp_port_587
- */
+#define SMTP_HOST "smtp.gmail.com"
 #define SMTP_PORT esp_mail_smtp_port_587
+#define AUTHOR_EMAIL "espthesisherbicide@gmail.com"
+#define AUTHOR_PASSWORD "alvfghopawgzfwdh"
+#define RECIPIENT_EMAIL "espthesisherbicide@gmail.com"
 
-/* The log in credentials */
-#define AUTHOR_EMAIL "octavi.ty@disroot.org"
-#define AUTHOR_PASSWORD "qZMN+kAkLwffgrLPv-un5Q_qxoM2+PLpTW7SRtLvQ-_.FrHwjY9vPnxh.tiDv5.Y"
-
-/* Recipient email address */
-#define RECIPIENT_EMAIL "octavio.tiberion@gmail.com"
-
-/* Declare the global used SMTPSession object for SMTP transport */
 SMTPSession smtp;
 
-/* Callback function to get the Email sending status */
 void smtpCallback(SMTP_Status status);
 
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
@@ -64,56 +71,109 @@ volatile int index1;
 volatile int index2;
 volatile int index3;
 String data;
-String temp;
-String tds;
-String ec;
-String ph;
 String htmlMsg;
 unsigned long lastExecTime = 0;
-const unsigned long interval = 300000;
+const unsigned long interval = 30000;
 
-float tempThreshold = 35;
-float ecThreshold = 2.0;
-float phThreshold = 6.0;
 
 /* Declare the message class */
 SMTP_Message message;
 
 volatile bool busy = false;
 
-void serialProcess()
-{
-  if (Serial2.available() && !busy)
-  {
-    String data = Serial2.readStringUntil('\n');
-    Serial.println("Received: " + data);
-    // Split by commas
-    index1 = data.indexOf(',');
-    index2 = data.indexOf(',', index1 + 1);
-    index3 = data.indexOf(',', index2 + 1);
 
-    temp = data.substring(0, index1);
-    tds = data.substring(index1 + 1, index2);
-    ec = data.substring(index2 + 1, index3);
-    ph = data.substring(index3 + 1);
+// void serialProcess()
+// {
+//   if (Serial2.available() && !busy)
+//   {
+//     String data = Serial2.readStringUntil('\n');
+//     Serial.println("Received: " + data);
+//     // Split by commas
+//     index1 = data.indexOf(',');
+//     index2 = data.indexOf(',', index1 + 1);
+//     index3 = data.indexOf(',', index2 + 1);
 
-    Serial.println("Temp: " + temp);
-    Serial.println("TDS: " + tds);
-    Serial.println("EC: " + ec);
-    Serial.println("pH: " + ph);
+//     temp = data.substring(0, index1);
+//     tds = data.substring(index1 + 1, index2);
+//     ec = data.substring(index2 + 1, index3);
+//     ph = data.substring(index3 + 1);
+
+//     Serial.println("Temp: " + temp);
+//     Serial.println("TDS: " + tds);
+//     Serial.println("EC: " + ec);
+//     Serial.println("pH: " + ph);
+//   }
+// }
+
+void displayData() {
+  // Read SHT20 Temperature and Humidity
+  float humd = sht20.readHumidity();
+  delay(100);
+  temperature = sht20.readTemperature();
+
+  // Read and calculate TDS and EC values
+  Serial.println("Gravity updating...");
+  gravityTds.setTemperature(temperature);
+  gravityTds.update();
+  tdsValue = gravityTds.getTdsValue();
+  ecValue = tdsValue * 1.0; // Simple conversion factor
+
+  // ec25Value = ecValue/(1+0.019*(temperature - 25.0));
+
+
+
+  // Read pH sensor values
+  for (int i = 0; i < 10; i++) {
+      buffer_arr[i] = analogRead(phPin);
+      delay(30);
   }
+
+  // Sort values to get median
+  for (int i = 0; i < 9; i++) {
+      for (int j = i + 1; j < 10; j++) {
+          if (buffer_arr[i] > buffer_arr[j]) {
+              temp = buffer_arr[i];
+              buffer_arr[i] = buffer_arr[j];
+              buffer_arr[j] = temp;
+          }
+      }
+  }
+
+  // Average middle 6 values
+  avgval = 0;
+  for (int i = 2; i < 8; i++) {
+      avgval += buffer_arr[i];
+  }
+
+  // Calculate pH value
+  float volt = (float)avgval * 5.0 / 1024.0 / 6.0;
+  ph_act = -5.70 * volt + calibration_value;
+
+  float t = millis() / 1000.0;
+  // float concentration = C0 * exp(-k * t);
+  
+  // Simulated threshold using pH, EC, and temp
+  //if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && concentration > concentrationThreshold) {
+  if ((ph_act < phThreshold || ecValue > ecThreshold || temp > tempThreshold)) {
+    digitalWrite(MotorPin, HIGH);
+  } else {
+    digitalWrite(MotorPin, LOW);
+  }
+  Serial.print("Temperature: ");
+  Serial.println(temperature);
+  Serial.print("pH: ");
+  Serial.println(ph_act);
+  Serial.print("EC: ");
+  Serial.println(ecValue);
+  Serial.print("TDS: ");
+  Serial.println(tdsValue);
+  
 }
 
 void smtpProcess()
 {
-  if (!busy)
-  {
-    busy = 1;
-  }
-  else
-  {
-    return;
-  }
+  
+
   smtp.debug(1);
 
   smtp.callback(smtpCallback);
@@ -149,15 +209,15 @@ void smtpProcess()
   message.subject = F("Unit Message");
   message.addRecipient(F("Admin"), RECIPIENT_EMAIL);
 
-  if ((ph.toFloat() < phThreshold))
+  if ((ph_act < phThreshold))
   {
     message.subject = F("Soil pH too low!");
   }
-  else if (ec.toFloat() > ecThreshold)
+  else if (ecValue > ecThreshold)
   {
     message.subject = F("Soil Electroconductivity too High!");
   }
-  else if (temp.toFloat() > tempThreshold)
+  else if (temperature > tempThreshold)
   {
     message.subject = F("Temperature too high!");
   }
@@ -168,7 +228,7 @@ void smtpProcess()
 
   // String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
 
-  htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
+  htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temperature) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tdsValue) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ecValue) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph_act) + "</span></p>";
 
   // htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
 
@@ -245,18 +305,33 @@ void smtpProcess()
   busy = false;
 }
 
+
+
 void setup()
 {
   data.reserve(200);
-  temp.reserve(200);
-  tds.reserve(200);
-  ec.reserve(200);
-  ph.reserve(200);
   htmlMsg.reserve(200);
-  Serial.begin(9600);
-  Serial2.begin(19200, SERIAL_8N1, 16, 17);
-  // smtpTicker.attach_ms(5000, smtpProcess);
-  serialTicker.attach_ms(1000, serialProcess);
+  Serial.begin(115200);
+
+  // SHT20 TwoWire
+  Wire.begin(SHT_SDA, SHT_SCL);
+  delay(100);
+  sht20.initSHT20();
+  delay(100);
+  sht20.checkSHT20();
+
+  // GravityTDS
+  gravityTds.setPin(TdsSensorPin);
+  gravityTds.setAref(3.3);
+  gravityTds.setAdcRange(4096);
+  gravityTds.begin();
+  // Serial2.begin(19200, SERIAL_8N1, 16, 17);
+  //  smtpTicker.attach_ms(5000, smtpProcess);
+  // serialTicker.attach_ms(1000, serialProcess);
+
+
+  pinMode(MotorPin, OUTPUT);
+  digitalWrite(MotorPin, LOW);
 
 #if defined(ARDUINO_ARCH_SAMD)
   while (!Serial)
@@ -306,14 +381,17 @@ void setup()
 void loop()
 {
   unsigned long currentTime = millis();
+delay(100);
+  displayData();
 
-  if ((ph.toFloat() < phThreshold || ec.toFloat() > ecThreshold || temp.toFloat() > tempThreshold))
+  if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && !testmode )
+  // if(false)
   {
     smtpProcess();
   }
   else
   {
-    if (currentTime - lastExecTime >= interval)
+    if ((currentTime - lastExecTime >= interval) && !testmode)
     {
       smtpProcess();
       lastExecTime = currentTime;
