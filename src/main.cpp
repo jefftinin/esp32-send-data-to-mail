@@ -2,17 +2,18 @@
 #include <Arduino.h>
 #if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
-//#include <Ticker.h>
+// #include <Ticker.h>
 #include <string.h>
 #include <Wire.h>
 #include <DFRobot_SHT20.h>
 #include "GravityTDS.h"
+#include <array>
 
 DFRobot_SHT20 sht20(&Wire);
 
-#define TdsSensorPin 35
+#define TdsSensorPin 34
 #define MotorPin 26
-#define phPin 34
+#define phPin 36
 #define SHT_SDA 33
 #define SHT_SCL 32
 GravityTDS gravityTds;
@@ -22,22 +23,25 @@ GravityTDS gravityTds;
 // Ticker phTicker;
 
 // Sensor variables
-float temperature = 25;
-float tdsValue = 0;
-float ecValue = 0;
-float ec25Value = 0;
+volatile float temperature = 25;
+volatile float humd = 0;
+volatile float tdsValue = 0;
+volatile float ecValue = 0;
+
+//float ec25Value = 0;
 
 // pH sensor variables
-float calibration_value = 26.34 - 0.5;
+//float calibration_value = 26.34 - 0.5;
 int buffer_arr[10], temp;
 unsigned long int avgval;
 float ph_act;
+float volt = 0;
 
 // User adjustable
 float phThreshold = 6.0;
 float ecThreshold = 2.0;
 float tempThreshold = 35;
-bool testmode = true;
+bool testmode = 1;
 
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -74,13 +78,12 @@ String data;
 String htmlMsg;
 unsigned long lastExecTime = 0;
 const unsigned long interval = 30000;
-
+int testpins[6] = {34, 35, 36, 37, 38, 39};
 
 /* Declare the message class */
 SMTP_Message message;
 
 volatile bool busy = false;
-
 
 // void serialProcess()
 // {
@@ -105,9 +108,10 @@ volatile bool busy = false;
 //   }
 // }
 
-void displayData() {
+void updateData()
+{
   // Read SHT20 Temperature and Humidity
-  float humd = sht20.readHumidity();
+  humd = sht20.readHumidity();
   delay(100);
   temperature = sht20.readTemperature();
 
@@ -116,49 +120,63 @@ void displayData() {
   gravityTds.setTemperature(temperature);
   gravityTds.update();
   tdsValue = gravityTds.getTdsValue();
-  ecValue = tdsValue * 1.0; // Simple conversion factor
+  ecValue = gravityTds.getEcValue();
 
   // ec25Value = ecValue/(1+0.019*(temperature - 25.0));
 
-
-
   // Read pH sensor values
-  for (int i = 0; i < 10; i++) {
-      buffer_arr[i] = analogRead(phPin);
-      delay(30);
+  for (int i = 0; i < 10; i++)
+  {
+    buffer_arr[i] = analogRead(phPin);
+    delay(30);
   }
 
   // Sort values to get median
-  for (int i = 0; i < 9; i++) {
-      for (int j = i + 1; j < 10; j++) {
-          if (buffer_arr[i] > buffer_arr[j]) {
-              temp = buffer_arr[i];
-              buffer_arr[i] = buffer_arr[j];
-              buffer_arr[j] = temp;
-          }
+  for (int i = 0; i < 9; i++)
+  {
+    for (int j = i + 1; j < 10; j++)
+    {
+      if (buffer_arr[i] > buffer_arr[j])
+      {
+        temp = buffer_arr[i];
+        buffer_arr[i] = buffer_arr[j];
+        buffer_arr[j] = temp;
       }
+    }
   }
 
   // Average middle 6 values
   avgval = 0;
-  for (int i = 2; i < 8; i++) {
-      avgval += buffer_arr[i];
+  for (int i = 2; i < 8; i++)
+  {
+    avgval += buffer_arr[i];
   }
 
   // Calculate pH value
-  float volt = (float)avgval * 5.0 / 1024.0 / 6.0;
-  ph_act = -5.70 * volt + calibration_value;
+  volt = (analogReadMilliVolts(phPin)/3300.0)*5.0;
+  ph_act = 7 + ((volt - 2.70)/ -0.1505882353);
+}
 
-  float t = millis() / 1000.0;
-  // float concentration = C0 * exp(-k * t);
-  
-  // Simulated threshold using pH, EC, and temp
-  //if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && concentration > concentrationThreshold) {
-  if ((ph_act < phThreshold || ecValue > ecThreshold || temp > tempThreshold)) {
+void motorFunction(float ph_act, float ecValue, float temperature){
+  if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold))
+  {
     digitalWrite(MotorPin, HIGH);
-  } else {
+  }
+  else
+  {
     digitalWrite(MotorPin, LOW);
   }
+}
+
+void displayData()
+{
+
+  // float t = millis() / 1000.0;
+  //  float concentration = C0 * exp(-k * t);
+
+  // Simulated threshold using pH, EC, and temp
+  // if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && concentration > concentrationThreshold) {
+  
   Serial.print("Temperature: ");
   Serial.println(temperature);
   Serial.print("pH: ");
@@ -167,12 +185,12 @@ void displayData() {
   Serial.println(ecValue);
   Serial.print("TDS: ");
   Serial.println(tdsValue);
-  
+  Serial.print("pH Voltage: ");
+  Serial.println(volt);
 }
 
 void smtpProcess()
 {
-  
 
   smtp.debug(1);
 
@@ -302,10 +320,10 @@ void smtpProcess()
   // smtp.sendingResult.clear();
 
   MailClient.printf("Free Heap: %d\n", MailClient.getFreeHeap());
-  busy = false;
+  message.clearHeader();
+  message.clearRecipients();
+
 }
-
-
 
 void setup()
 {
@@ -329,7 +347,6 @@ void setup()
   //  smtpTicker.attach_ms(5000, smtpProcess);
   // serialTicker.attach_ms(1000, serialProcess);
 
-
   pinMode(MotorPin, OUTPUT);
   digitalWrite(MotorPin, LOW);
 
@@ -338,16 +355,20 @@ void setup()
     ;
 #endif
 
-  Serial.println();
-
+ 
+if (!testmode){
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+Serial.println();
+Serial.print("Connecting to Wi-Fi");
   multi.addAP(WIFI_SSID, WIFI_PASSWORD);
   multi.run();
 #else
+Serial.println();
+Serial.print("Connecting to Wi-Fi");
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 #endif
 
-  Serial.print("Connecting to Wi-Fi");
+  
 
 #if defined(ARDUINO_RASPBERRY_PI_PICO_W)
   unsigned long ms = millis();
@@ -377,14 +398,33 @@ void setup()
   MailClient.addAP(WIFI_SSID, WIFI_PASSWORD);
 #endif
 }
+}
 
 void loop()
 {
   unsigned long currentTime = millis();
-delay(100);
-  displayData();
+  updateData();
+  delay(100);
+  if (!testmode)
+  {
+    displayData();
+    motorFunction(ph_act, ecValue, temperature);
+  }
+  
 
-  if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && !testmode )
+  if (testmode)
+  {
+    for (int i = 0; i <= 5; i++)
+    {
+      delay(500);
+      Serial.print(testpins[i]);
+      Serial.print(": ");
+      Serial.println(analogRead(testpins[i]));
+    }
+    displayData();
+  }
+
+  if ((ph_act < phThreshold || ecValue > ecThreshold || temperature > tempThreshold) && !testmode)
   // if(false)
   {
     smtpProcess();

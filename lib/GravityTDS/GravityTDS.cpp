@@ -16,13 +16,14 @@
 
 #include <EEPROM.h>
 #include "GravityTDS.h"
+#include <Arduino.h>
 
 #define EEPROM_write(address, p) {int i = 0; byte *pp = (byte*)&(p);for(; i < sizeof(p); i++) EEPROM.write(address+i, pp[i]);}
 #define EEPROM_read(address, p)  {int i = 0; byte *pp = (byte*)&(p);for(; i < sizeof(p); i++) pp[i]=EEPROM.read(address+i);}
 
 GravityTDS::GravityTDS()
 {
-    this->pin = 36;
+    this->pin = 34;
     this->temperature = 25.0;
     this->aref = 5.0;
     this->adcRange = 1024.0;
@@ -73,10 +74,16 @@ float GravityTDS::getKvalue()
 void GravityTDS::update()
 {
 	this->analogValue = analogRead(this->pin);
+  // Serial.print("Analog Value: ");
+  // Serial.println(analogValue);
 	this->voltage = this->analogValue/this->adcRange*this->aref;
+  // Serial.print("Gravity Voltage Value: ");
+  // Serial.println(voltage);
 	this->ecValue=(133.42*this->voltage*this->voltage*this->voltage - 255.86*this->voltage*this->voltage + 857.39*this->voltage)*this->kValue;
 	this->ecValue25  =  this->ecValue / (1.0+0.02*(this->temperature-25.0));  //temperature compensation
 	this->tdsValue = ecValue25 * TdsFactor;
+  // Serial.print("EC Value: ");
+  // Serial.println(ecValue);
 	if(cmdSerialDataAvailable() > 0)
         {
             ecCalibration(cmdParse());  // if received serial cmd from the serial monitor, enter into the calibration mode
@@ -101,6 +108,8 @@ void GravityTDS::readKValues()
     {
       this->kValue = 1.0;   // default value: K = 1.0
       EEPROM_write(this->kValueAddress, this->kValue);
+    } else {
+      this->kValue = 1.0; 
     }
 }
 
