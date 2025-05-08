@@ -11,6 +11,8 @@
 
 DFRobot_SHT20 sht20(&Wire);
 
+bool testmode = 0;
+
 #define TdsSensorPin 34
 #define MotorPin 26
 #define phPin 36
@@ -38,10 +40,10 @@ float ph_act;
 float volt = 0;
 
 // User adjustable
-float phThreshold = 6.0;
-float ecThreshold = 2.0;
-float tempThreshold = 35;
-bool testmode = 1;
+float phThreshold = 6.0; // pH level
+float ecThreshold = 300.0; // milliSiemens
+float tempThreshold = 35; // degrees Celsius
+
 
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
@@ -74,7 +76,7 @@ WiFiMulti multi;
 volatile int index1;
 volatile int index2;
 volatile int index3;
-String data;
+//String data;
 String htmlMsg;
 unsigned long lastExecTime = 0;
 const unsigned long interval = 30000;
@@ -112,11 +114,10 @@ void updateData()
 {
   // Read SHT20 Temperature and Humidity
   humd = sht20.readHumidity();
-  delay(100);
   temperature = sht20.readTemperature();
 
   // Read and calculate TDS and EC values
-  Serial.println("Gravity updating...");
+  ///Serial.println("Gravity updating...");
   gravityTds.setTemperature(temperature);
   gravityTds.update();
   tdsValue = gravityTds.getTdsValue();
@@ -154,7 +155,7 @@ void updateData()
 
   // Calculate pH value
   volt = (analogReadMilliVolts(phPin)/3300.0)*5.0;
-  ph_act = 7 + ((volt - 2.70)/ -0.1505882353);
+  ph_act = 7 + ((volt - 2.70)/ -0.2);
 }
 
 void motorFunction(float ph_act, float ecValue, float temperature){
@@ -225,29 +226,30 @@ void smtpProcess()
   message.sender.name = F("ESP32");
   message.sender.email = AUTHOR_EMAIL;
   message.subject = F("Unit Message");
-  message.addRecipient(F("Admin"), RECIPIENT_EMAIL);
-
-  if ((ph_act < phThreshold))
-  {
-    message.subject = F("Soil pH too low!");
-  }
-  else if (ecValue > ecThreshold)
-  {
-    message.subject = F("Soil Electroconductivity too High!");
-  }
-  else if (temperature > tempThreshold)
-  {
-    message.subject = F("Temperature too high!");
-  }
-  else
-  {
-    message.subject = F("Normal Reading");
-  }
+  message.addRecipient(F("Recipient"), RECIPIENT_EMAIL);
+  message.subject = F("Probe Sensor Data");
+ 
 
   // String htmlMsg = "<p>This is the html text message.</p><p>The message was sent via ESP device.</p>";
 
   htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temperature) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tdsValue) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ecValue) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph_act) + "</span></p>";
 
+  if ((ph_act < phThreshold))
+  {
+    htmlMsg = "<h1 style='font-size:24px;'>Soil pH too low!</h1>" + htmlMsg;
+  }
+  else if (ecValue > ecThreshold)
+  {
+    htmlMsg = "<h1 style='font-size:24px;'>Soil Electroconductivity too High!</h1>" + htmlMsg;
+  }
+  else if (temperature > tempThreshold)
+  {
+    htmlMsg = "<h1 style='font-size:24px;'>Temperature too high!</h1>" + htmlMsg;
+  }
+  else
+  {
+    // nothing 
+  }
   // htmlMsg = "<h1 style='font-size:24px;'>Sensor Readings</h1><p><b style='font-size:16px;'>Temperature:</b> <span style='font-size:14px;'>" + String(temp) + "</span><br><b style='font-size:16px;'>TDS:</b> <span style='font-size:14px;'>" + String(tds) + "</span><br><b style='font-size:16px;'>EC:</b> <span style='font-size:14px;'>" + String(ec) + "</span><br><b style='font-size:16px;'>pH:</b> <span style='font-size:14px;'>" + String(ph) + "</span></p>";
 
   message.html.content = htmlMsg;
@@ -327,8 +329,7 @@ void smtpProcess()
 
 void setup()
 {
-  data.reserve(200);
-  htmlMsg.reserve(200);
+  htmlMsg.reserve(500);
   Serial.begin(115200);
 
   // SHT20 TwoWire
@@ -404,7 +405,6 @@ void loop()
 {
   unsigned long currentTime = millis();
   updateData();
-  delay(100);
   if (!testmode)
   {
     displayData();
@@ -416,7 +416,6 @@ void loop()
   {
     for (int i = 0; i <= 5; i++)
     {
-      delay(500);
       Serial.print(testpins[i]);
       Serial.print(": ");
       Serial.println(analogRead(testpins[i]));
